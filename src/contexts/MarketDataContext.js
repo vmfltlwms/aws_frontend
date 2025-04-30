@@ -12,6 +12,7 @@ const initialState = {
 function marketDataReducer(state, action) {
   switch (action.type) {
     case 'SUBSCRIBE_GROUP':
+      console.log('SUBSCRIBE_GROUP 액션:', action.payload);
       return {
         ...state,
         groups: {
@@ -34,6 +35,7 @@ function marketDataReducer(state, action) {
       };
 
     case 'UNSUBSCRIBE_GROUP':
+      console.log('UNSUBSCRIBE_GROUP 액션:', action.payload);
       const { groupNo, items, dataTypes } = action.payload;
       const newGroups = { ...state.groups };
 
@@ -69,6 +71,7 @@ function marketDataReducer(state, action) {
       };
 
     case 'UPDATE_STOCK_DATA':
+      console.log('UPDATE_STOCK_DATA 액션:', action.payload);
       return {
         ...state,
         stockData: {
@@ -93,21 +96,85 @@ export function MarketDataProvider({ children }) {
 
   // 실시간 데이터 수신 시 상태 업데이트
   useEffect(() => {
+    if (messages.length === 0) return;
+
     const lastMessage = messages[messages.length - 1];
-    if (lastMessage?.type === 'realtime_price') {
-      dispatch({
-        type: 'UPDATE_STOCK_DATA',
-        payload: {
-          code: lastMessage.item,
-          data: lastMessage.data,
-        },
-      });
+    console.log('서버에서 메시지 수신:', lastMessage);
+
+    // 메시지 형식 분석 및 처리
+    try {
+      // 실시간 가격 데이터 처리
+      if (lastMessage.type === 'realtime_price') {
+        dispatch({
+          type: 'UPDATE_STOCK_DATA',
+          payload: {
+            code: lastMessage.item,
+            data: lastMessage.data,
+          },
+        });
+      }
+      // 다른 형식의 메시지에서 주식 데이터 추출 시도
+      else if (
+        lastMessage.action === 'subscribe_price' &&
+        lastMessage.status === 'success'
+      ) {
+        console.log('구독 성공 응답:', lastMessage);
+        // 구독 성공 처리 (필요시)
+      }
+      // 키움 API 특유의 메시지 형식 처리
+      else if (lastMessage.trnm === 'RECV') {
+        const stockCode = lastMessage.item;
+        const typeCode = lastMessage.typ;
+        const values = lastMessage.values || {};
+
+        // 데이터 타입에 따른 처리
+        if (typeCode === '0D') {
+          // 현재가 정보
+          // 필요한 필드 추출 (필드명은 키움 API 문서 참조)
+          const price = parseFloat(values['81'] || 0); // 현재가
+          const change = parseFloat(values['86'] || 0); // 전일대비
+          const changeRatio = parseFloat(values['25'] || 0); // 등락율
+          const volume = parseInt(values['13'] || 0); // 거래량
+
+          console.log(`종목 ${stockCode} 데이터 수신:`, {
+            price,
+            change,
+            changeRatio,
+            volume,
+          });
+
+          dispatch({
+            type: 'UPDATE_STOCK_DATA',
+            payload: {
+              code: stockCode,
+              data: {
+                price,
+                change,
+                change_ratio: changeRatio,
+                volume,
+                timestamp: Date.now(),
+              },
+            },
+          });
+        }
+      }
+    } catch (error) {
+      console.error('메시지 처리 중 오류:', error);
     }
   }, [messages]);
 
   // 구독 메서드
   const subscribe = (groupNo, items, dataTypes = ['0D'], refresh = false) => {
+    console.log(
+      `구독 요청: 그룹=${groupNo}, 종목=${items.join(
+        ','
+      )}, 타입=${dataTypes.join(',')}, 새로고침=${refresh}`
+    );
+
+    // 서버에 구독 요청 전송
     subscribePrice(groupNo, items, dataTypes, refresh);
+
+    // 로컬 상태 업데이트
     dispatch({
       type: 'SUBSCRIBE_GROUP',
       payload: { groupNo, items, dataTypes, refresh },
@@ -116,12 +183,28 @@ export function MarketDataProvider({ children }) {
 
   // 구독 해제 메서드
   const unsubscribe = (groupNo, items = null, dataTypes = null) => {
+    console.log(
+      `구독 해제 요청: 그룹=${groupNo}, 종목=${
+        items ? items.join(',') : '전체'
+      }`
+    );
+
+    // 서버에 구독 해제 요청 전송
     unsubscribePrice(groupNo, items, dataTypes);
+
+    // 로컬 상태 업데이트
     dispatch({
       type: 'UNSUBSCRIBE_GROUP',
       payload: { groupNo, items, dataTypes },
     });
   };
+
+  // 연결 상태 변화 로깅
+  useEffect(() => {
+    console.log(
+      `WebSocket 연결 상태 변경: ${isConnected ? '연결됨' : '연결 끊김'}`
+    );
+  }, [isConnected]);
 
   return (
     <MarketDataContext.Provider

@@ -8,7 +8,7 @@ function App() {
     <MarketDataProvider>
       <div className="App">
         <header className="App-header">
-          <h1>증권 트레이딩 시스템</h1>
+          <h2>증권 트레이딩 시스템</h2>
         </header>
         <main>
           <RealtimeMarketPage />
